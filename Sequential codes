@@ -1,0 +1,309 @@
+%% Dynamic Model of the IRB 140
+clear all; close all; clc;
+%% Defining joint variables
+syms q1(t) q2(t) q3(t) q4(t) q5(t) q6(t) real
+syms g real
+q = [q1(t); q2(t); q3(t); q4(t); q5(t); q6(t)];
+Dq = diff(q, t);
+DDq = diff(Dq, t);
+%% Defining link length vectors
+% DH parameters for IRB 140
+a = [0, 0.070, 0, 0, 0, 0]; % Link lengths
+d = [0.352, 0, 0, 0.380, 0, 0.065]; % Joint offsets
+alpha = [pi/2, 0, -pi/2, pi/2, -pi/2, 0]; % Link twists
+% Link length vectors
+r01 = [0; 0; d(1)];
+r12 = [a(2); 0; 0];
+r23 = [0; 0; 0];
+r34 = [0; 0; d(4)];
+r45 = [0; 0; 0];
+r56 = [0; 0; d(6)];
+% Center of mass vectors
+syms rc1x rc1y rc1z rc2x rc2y rc2z rc3x rc3y rc3z real
+syms rc4x rc4y rc4z rc5x rc5y rc5z rc6x rc6y rc6z real
+r0c1 = [rc1x; rc1y; rc1z];
+r1c2 = [rc2x; rc2y; rc2z];
+r2c3 = [rc3x; rc3y; rc3z];
+r3c4 = [rc4x; rc4y; rc4z];
+r4c5 = [rc5x; rc5y; rc5z];
+r5c6 = [rc6x; rc6y; rc6z];
+%% Substituting center of mass values
+% Center of mass positions given in local link frames (meters)
+rc1x = 0; rc1y = -0.03; rc1z = 0.12;
+rc2x = 0.28; rc2y = 0; rc2z = 0.135;
+rc3x = 0.02; rc3y = 0.03; rc3z = 0.1;
+rc4x = 0; rc4y = 0.01; rc4z = 0.05;
+rc5x = 0; rc5y = 0; rc5z = 0.02;
+rc6x = 0; rc6y = 0; rc6z = 0.01;
+% Update center of mass vectors with actual values
+r0c1 = [rc1x; rc1y; rc1z];
+r1c2 = [rc2x; rc2y; rc2z];
+r2c3 = [rc3x; rc3y; rc3z];
+r3c4 = [rc4x; rc4y; rc4z];
+r4c5 = [rc5x; rc5y; rc5z];
+r5c6 = [rc6x; rc6y; rc6z];
+% Local COM vectors
+r1c1 = r0c1 - r01;
+r2c2 = r1c2 - r12;
+r3c3 = r2c3 - r23;
+r4c4 = r3c4 - r34;
+r5c5 = r4c5 - r45;
+r6c6 = r5c6 - r56;
+%% Gravity vector in inertial frame
+g0 = [0; 0; -g];
+g = 9.81; % Setting gravity constant value (m/s²)
+%% Rotation matrices
+% DH convention rotation matrices
+R01 = dh_rotation(q1, alpha(1), a(1), d(1));
+R12 = dh_rotation(q2, alpha(2), a(2), d(2));
+R23 = dh_rotation(q3, alpha(3), a(3), d(3));
+R34 = dh_rotation(q4, alpha(4), a(4), d(4));
+R45 = dh_rotation(q5, alpha(5), a(5), d(5));
+R56 = dh_rotation(q6, alpha(6), a(6), d(6));
+% Compound rotation matrices
+R02 = simplify(R01 * R12);
+R03 = simplify(R02 * R23);
+R04 = simplify(R03 * R34);
+R05 = simplify(R04 * R45);
+R06 = simplify(R05 * R56);
+%% Axis of rotation of joint i expressed in frame i
+z0 = [0; 0; 1];
+b1 = simplify(R01' * z0);
+b2 = simplify(R12' * b1);
+b3 = simplify(R23' * b2);
+b4 = simplify(R34' * b3);
+b5 = simplify(R45' * b4);
+b6 = simplify(R56' * b5);
+%% Link Masses
+syms m1 m2 m3 m4 m5 m6 real
+% Substituting mass values (kg)
+m1 = 9.0;
+m2 = 8.5;
+m3 = 4.8;
+m4 = 1.2;
+m5 = 1.0;
+m6 = 0.5;
+%% Inertia matrices
+% Define inertia tensors in local frames
+syms I1xx I1xy I1xz I1yx I1yy I1yz I1zx I1zy I1zz real
+syms I2xx I2xy I2xz I2yx I2yy I2yz I2zx I2zy I2zz real
+syms I3xx I3xy I3xz I3yx I3yy I3yz I3zx I3zy I3zz real
+syms I4xx I4xy I4xz I4yx I4yy I4yz I4zx I4zy I4zz real
+syms I5xx I5xy I5xz I5yx I5yy I5yz I5zx I5zy I5zz real
+syms I6xx I6xy I6xz I6yx I6yy I6yz I6zx I6zy I6zz real
+% Substituting inertia values (kg·m²)
+% Assuming diagonal inertia tensors (off-diagonal terms are zero)
+I1xx = 0.1; I1xy = 0; I1xz = 0; I1yx = 0; I1yy = 0.08; I1yz = 0; I1zx = 0; I1zy = 0; I1zz = 0.05;
+I2xx = 0.07; I2xy = 0; I2xz = 0; I2yx = 0; I2yy = 0.05; I2yz = 0; I2zx = 0; I2zy = 0; I2zz = 0.02;
+I3xx = 0.04; I3xy = 0; I3xz = 0; I3yx = 0; I3yy = 0.03; I3yz = 0; I3zx = 0; I3zy = 0; I3zz = 0.01;
+I4xx = 0.01; I4xy = 0; I4xz = 0; I4yx = 0; I4yy = 0.01; I4yz = 0; I4zx = 0; I4zy = 0; I4zz = 0.005;
+I5xx = 0.005; I5xy = 0; I5xz = 0; I5yx = 0; I5yy = 0.004; I5yz = 0; I5zx = 0; I5zy = 0; I5zz = 0.002;
+I6xx = 0.002; I6xy = 0; I6xz = 0; I6yx = 0; I6yy = 0.0015; I6yz = 0; I6zx = 0; I6zy = 0; I6zz =
+0.001;
+I1 = [I1xx I1xy I1xz; I1yx I1yy I1yz; I1zx I1zy I1zz];
+I2 = [I2xx I2xy I2xz; I2yx I2yy I2yz; I2zx I2zy I2zz];
+I3 = [I3xx I3xy I3xz; I3yx I3yy I3yz; I3zx I3zy I3zz];
+I4 = [I4xx I4xy I4xz; I4yx I4yy I4yz; I4zx I4zy I4zz];
+I5 = [I5xx I5xy I5xz; I5yx I5yy I5yz; I5zx I5zy I5zz];
+I6 = [I6xx I6xy I6xz; I6yx I6yy I6yz; I6zx I6zy I6zz];
+%% Forward recursion: Link 1
+% Angular velocity and acceleration
+ω1 = b1 * Dq(1);
+α1 = b1 * DDq(1) + cross(ω1, b1 * Dq(1));
+Dω1 = diff(ω1, t);
+% Linear accelerations
+ac1 = cross(Dω1, r0c1) + cross(ω1, cross(ω1, r0c1));
+g1 = R01' * g0;
+%% Forward recursion: Link 2
+ω2 = R12' * ω1 + b2 * Dq(2);
+α2 = R12' * α1 + b2 * DDq(2) + cross(ω2, b2 * Dq(2));
+Dω2 = diff(ω2, t);
+ac2 = R12' * (cross(Dω1, r01) + cross(ω1, cross(ω1, r01))) + ...
+ cross(Dω2, r1c2) + cross(ω2, cross(ω2, r1c2));
+g2 = R02' * g0;
+%% Forward recursion: Link 3
+ω3 = R23' * ω2 + b3 * Dq(3);
+α3 = R23' * α2 + b3 * DDq(3) + cross(ω3, b3 * Dq(3));
+Dω3 = diff(ω3, t);
+ac3 = R23' * (R12' * (cross(Dω1, r01) + cross(ω1, cross(ω1, r01))) + ...
+ cross(Dω2, r12) + cross(ω2, cross(ω2, r12))) + ...
+ cross(Dω3, r2c3) + cross(ω3, cross(ω3, r2c3));
+g3 = R03' * g0;
+%% Forward recursion: Link 4
+ω4 = R34' * ω3 + b4 * Dq(4);
+α4 = R34' * α3 + b4 * DDq(4) + cross(ω4, b4 * Dq(4));
+Dω4 = diff(ω4, t);
+ac4 = R34' * (R23' * (R12' * (cross(Dω1, r01) + cross(ω1, cross(ω1, r01))) + ...
+ cross(Dω2, r12) + cross(ω2, cross(ω2, r12))) + ...
+ cross(Dω3, r23) + cross(ω3, cross(ω3, r23))) + ...
+ cross(Dω4, r3c4) + cross(ω4, cross(ω4, r3c4));
+g4 = R04' * g0;
+%% Forward recursion: Link 5
+ω5 = R45' * ω4 + b5 * Dq(5);
+α5 = R45' * α4 + b5 * DDq(5) + cross(ω5, b5 * Dq(5));
+Dω5 = diff(ω5, t);
+ac5 = R45' * (R34' * (R23' * (R12' * (cross(Dω1, r01) + cross(ω1, cross(ω1, r01))) + ...
+ cross(Dω2, r12) + cross(ω2, cross(ω2, r12))) + ...
+ cross(Dω3, r23) + cross(ω3, cross(ω3, r23))) + ...
+ cross(Dω4, r34) + cross(ω4, cross(ω4, r34))) + ...
+ cross(Dω5, r4c5) + cross(ω5, cross(ω5, r4c5));
+g5 = R05' * g0;
+%% Forward recursion: Link 6
+ω6 = R56' * ω5 + b6 * Dq(6);
+α6 = R56' * α5 + b6 * DDq(6) + cross(ω6, b6 * Dq(6));
+Dω6 = diff(ω6, t);
+ac6 = R56' * (R45' * (R34' * (R23' * (R12' * (cross(Dω1, r01) + cross(ω1, cross(ω1, r01))) + ...
+ cross(Dω2, r12) + cross(ω2, cross(ω2, r12))) + ...
+ cross(Dω3, r23) + cross(ω3, cross(ω3, r23))) + ...
+ cross(Dω4, r34) + cross(ω4, cross(ω4, r34))) + ...
+ cross(Dω5, r45) + cross(ω5, cross(ω5, r45))) + ...
+ cross(Dω6, r5c6) + cross(ω6, cross(ω6, r5c6));
+g6 = R06' * g0;
+%% Backward recursion: Link 6
+f6 = m6 * ac6 - m6 * g6;
+τ6 = -cross(f6, r5c6) + I6 * α6 + cross(ω6, I6 * ω6);
+τ6Dyn = simplify(b6' * τ6);
+%% Backward recursion: Link 5
+f5 = R56 * f6 + m5 * ac5 - m5 * g5;
+τ5 = R56 * τ6 - cross(f5, r4c5) + cross(R56 * f6, r5c5) + I5 * α5 + cross(ω5, I5 * ω5);
+τ5Dyn = simplify(b5' * τ5);
+%% Backward recursion: Link 4
+f4 = R45 * f5 + m4 * ac4 - m4 * g4;
+τ4 = R45 * τ5 - cross(f4, r3c4) + cross(R45 * f5, r4c4) + I4 * α4 + cross(ω4, I4 * ω4);
+τ4Dyn = simplify(b4' * τ4);
+%% Backward recursion: Link 3
+f3 = R34 * f4 + m3 * ac3 - m3 * g3;
+τ3 = R34 * τ4 - cross(f3, r2c3) + cross(R34 * f4, r3c3) + I3 * α3 + cross(ω3, I3 * ω3);
+τ3Dyn = simplify(b3' * τ3);
+%% Backward recursion: Link 2
+f2 = R23 * f3 + m2 * ac2 - m2 * g2;
+τ2 = R23 * τ3 - cross(f2, r1c2) + cross(R23 * f3, r2c2) + I2 * α2 + cross(ω2, I2 * ω2);
+τ2Dyn = simplify(b2' * τ2);
+%% Backward recursion: Link 1
+f1 = R12 * f2 + m1 * ac1 - m1 * g1;
+τ1 = R12 * τ2 - cross(f1, r0c1) + cross(R12 * f2, r1c1) + I1 * α1 + cross(ω1, I1 * ω1);
+τ1Dyn = simplify(b1' * τ1);
+%% Setting up the matrix elements
+% Extract mass matrix, Coriolis/centrifugal terms, and gravity
+% Calculate Mass Matrix
+M = zeros(6, 6);
+subs_zero = [Dq(1) 0 Dq(2) 0 Dq(3) 0 Dq(4) 0 Dq(5) 0 Dq(6) 0 g 0];
+for i = 1:6
+ for j = 1:6
+ % Set up acceleration vector with only one non-zero entry
+ subs_acc = zeros(1, 12);
+ for k = 1:6
+ if k == j
+ subs_acc(2*k-1:2*k) = [DDq(k) 1];
+ else
+ subs_acc(2*k-1:2*k) = [DDq(k) 0];
+ end
+ end
+
+ % Extract mass matrix element
+ switch i
+ case 1
+ M(i,j) = subs(τ1Dyn, [subs_zero subs_acc]);
+ case 2
+ M(i,j) = subs(τ2Dyn, [subs_zero subs_acc]);
+ case 3
+ M(i,j) = subs(τ3Dyn, [subs_zero subs_acc]);
+ case 4
+ M(i,j) = subs(τ4Dyn, [subs_zero subs_acc]);
+ case 5
+ M(i,j) = subs(τ5Dyn, [subs_zero subs_acc]);
+ case 6
+ M(i,j) = subs(τ6Dyn, [subs_zero subs_acc]);
+ end
+ end
+end
+% Calculate gravity vector
+G = zeros(6, 1);
+subs_zero_acc = [DDq(1) 0 DDq(2) 0 DDq(3) 0 DDq(4) 0 DDq(5) 0 DDq(6) 0 ...
+ Dq(1) 0 Dq(2) 0 Dq(3) 0 Dq(4) 0 Dq(5) 0 Dq(6) 0];
+G(1) = subs(τ1Dyn, [subs_zero_acc g 9.81]);
+G(2) = subs(τ2Dyn, [subs_zero_acc g 9.81]);
+G(3) = subs(τ3Dyn, [subs_zero_acc g 9.81]);
+G(4) = subs(τ4Dyn, [subs_zero_acc g 9.81]);
+G(5) = subs(τ5Dyn, [subs_zero_acc g 9.81]);
+G(6) = subs(τ6Dyn, [subs_zero_acc g 9.81]);
+%% Setting up the dynamic system
+% Assemble the final dynamics
+τD = [τ1Dyn; τ2Dyn; τ3Dyn; τ4Dyn; τ5Dyn; τ6Dyn];
+% Calculate Coriolis and centrifugal terms
+C_Dq = simplify(τD - M * [DDq(1); DDq(2); DDq(3); DDq(4); DDq(5); DDq(6)] - G);
+%% Kinetic energy
+% Calculate the total kinetic energy
+KE = 0;
+for i = 1:6
+ for j = 1:6
+ KE = KE + 0.5 * M(i,j) * Dq(i) * Dq(j);
+ end
+end
+KE = simplify(KE);
+%% Add simulation code to visualize robot motion
+% Define a trajectory for the robot to follow
+% This is a simple joint space trajectory
+t_sim = 0:0.01:2; % Time vector (0 to 2 seconds with 0.01s steps)
+n_points = length(t_sim);
+% Define initial and final joint positions (radians)
+q_init = [0; 0; 0; 0; 0; 0];
+q_final = [pi/4; pi/6; -pi/3; pi/4; pi/6; pi/2];
+% Generate a simple trajectory (linear interpolation)
+q_traj = zeros(6, n_points);
+dq_traj = zeros(6, n_points);
+ddq_traj = zeros(6, n_points);
+for i = 1:6
+ % Position: Linear trajectory
+ q_traj(i,:) = q_init(i) + (q_final(i) - q_init(i)) * (t_sim / t_sim(end));
+
+ % Velocity: Constant for linear trajectory
+ dq_traj(i,:) = (q_final(i) - q_init(i)) / t_sim(end) * ones(1, n_points);
+
+ % Acceleration: Zero for constant velocity
+ ddq_traj(i,:) = zeros(1, n_points);
+end
+% Calculate required torques along the trajectory
+tau_sim = zeros(6, n_points);
+for k = 1:n_points
+ % Substitute numerical values for symbolic variables
+ q_num = q_traj(:,k);
+ dq_num = dq_traj(:,k);
+ ddq_num = ddq_traj(:,k);
+
+ % Get dynamics matrices at current configuration
+ [M_num, C_num, G_num] = IRB140_dynamics(q_num, dq_num);
+
+ % Calculate joint torques
+ tau_sim(:,k) = M_num * ddq_num + C_num + G_num;
+end
+% Plot joint trajectories and torques
+figure(1);
+subplot(2,1,1);
+plot(t_sim, q_traj');
+title('Joint Trajectories');
+xlabel('Time (s)');
+ylabel('Joint Position (rad)');
+legend('q1', 'q2', 'q3', 'q4', 'q5', 'q6');
+grid on;
+subplot(2,1,2);
+plot(t_sim, tau_sim');
+title('Required Joint Torques');
+xlabel('Time (s)');
+ylabel('Torque (N·m)');
+legend('τ1', 'τ2', 'τ3', 'τ4', 'τ5', 'τ6');
+grid on;
+%% Matlab conversion
+% Generate MATLAB function for numerical computation
+matlabFunction([M, C_Dq, G], 'File', 'IRB140_dynamics', 'Vars', {q, Dq});
+%% Helper function for DH transformation
+function R = dh_rotation(theta, alpha, a, d)
+ ct = cos(theta);
+ st = sin(theta);
+ ca = cos(alpha);
+ sa = sin(alpha);
+
+ R = [ct, -st*ca, st*sa;
+ st, ct*ca, -ct*sa;
+ 0, sa, ca];
+end
