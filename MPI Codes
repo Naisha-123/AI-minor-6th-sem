@@ -1,0 +1,558 @@
+%% Dynamic Model of the IRB 140 with MPI for Distributed Computing
+% This code implements the dynamic model calculation using the MPI interface
+% within MATLAB to parallelize computations across multiple processes.
+% First, ensure MATLAB Parallel Server and MPI are properly configured
+clear all; close all; clc;
+% Initialize MPI environment
+% Note: You'll need to have MATLAB Parallel Server with MPI configured
+% This example assumes you have the MPI toolbox or a wrapper configured
+% Load MPI library if using a custom interface
+% addpath('/path/to/mpi/interface'); % Uncomment and adjust path as needed
+%% Check MPI availability and initialize
+if ~exist('MPI_Init', 'file')
+ error('MPI functions not found. Please ensure MATLAB MPI interface is installed.');
+end
+% Initialize MPI
+MPI_Init();
+% Get rank (process ID) and size (total number of processes)
+rank = MPI_Comm_rank(MPI_COMM_WORLD);
+size = MPI_Comm_size(MPI_COMM_WORLD);
+% Main process (rank 0) handles most of the setup
+if rank == 0
+ disp(['Running with ', num2str(size), ' MPI processes']);
+end
+%% Define symbolic variables - done by all processes
+syms q1(t) q2(t) q3(t) q4(t) q5(t) q6(t) real
+syms g real
+q = [q1(t); q2(t); q3(t); q4(t); q5(t); q6(t)];
+Dq = diff(q, t);
+DDq = diff(Dq, t);
+%% Defining DH parameters and link vectors (all processes)
+% DH parameters for IRB 140
+a = [0, 0.070, 0, 0, 0, 0]; % Link lengths
+d = [0.352, 0, 0, 0.380, 0, 0.065]; % Joint offsets
+alpha = [pi/2, 0, -pi/2, pi/2, -pi/2, 0]; % Link twists
+% Link length vectors
+r01 = [0; 0; d(1)];
+r12 = [a(2); 0; 0];
+r23 = [0; 0; 0];
+r34 = [0; 0; d(4)];
+r45 = [0; 0; 0];
+r56 = [0; 0; d(6)];
+%% Add the provided parameter values
+% Link Masses (kg)
+m1 = 9.0;
+m2 = 8.5;
+m3 = 4.8;
+m4 = 1.2;
+m5 = 1.0;
+m6 = 0.5;
+% Center of Mass Positions (in local link frame, meters)
+r0c1 = [0; -0.03; 0.12];
+r1c2 = [0.28; 0; 0.135];
+r2c3 = [0.02; 0.03; 0.1];
+r3c4 = [0; 0.01; 0.05];
+r4c5 = [0; 0; 0.02];
+r5c6 = [0; 0; 0.01];
+% Local COM vectors
+r1c1 = r0c1 - r01;
+r2c2 = r1c2 - r12;
+r3c3 = r2c3 - r23;
+r4c4 = r3c4 - r34;
+r5c5 = r4c5 - r45;
+r6c6 = r5c6 - r56;
+% Inertia Tensors (diagonal terms only as provided)
+% Link 1
+I1xx = 0.1; I1yy = 0.08; I1zz = 0.05;
+I1xy = 0; I1xz = 0; I1yx = 0; I1yz = 0; I1zx = 0; I1zy = 0;
+I1 = [I1xx, I1xy, I1xz; I1yx, I1yy, I1yz; I1zx, I1zy, I1zz];
+% Link 2
+I2xx = 0.07; I2yy = 0.05; I2zz = 0.02;
+I2xy = 0; I2xz = 0; I2yx = 0; I2yz = 0; I2zx = 0; I2zy = 0;
+I2 = [I2xx, I2xy, I2xz; I2yx, I2yy, I2yz; I2zx, I2zy, I2zz];
+% Link 3
+I3xx = 0.04; I3yy = 0.03; I3zz = 0.01;
+I3xy = 0; I3xz = 0; I3yx = 0; I3yz = 0; I3zx = 0; I3zy = 0;
+I3 = [I3xx, I3xy, I3xz; I3yx, I3yy, I3yz; I3zx, I3zy, I3zz];
+% Link 4
+I4xx = 0.01; I4yy = 0.01; I4zz = 0.005;
+I4xy = 0; I4xz = 0; I4yx = 0; I4yz = 0; I4zx = 0; I4zy = 0;
+I4 = [I4xx, I4xy, I4xz; I4yx, I4yy, I4yz; I4zx, I4zy, I4zz];
+% Link 5
+I5xx = 0.005; I5yy = 0.004; I5zz = 0.002;
+I5xy = 0; I5xz = 0; I5yx = 0; I5yz = 0; I5zx = 0; I5zy = 0;
+I5 = [I5xx, I5xy, I5xz; I5yx, I5yy, I5yz; I5zx, I5zy, I5zz];
+% Link 6 (estimating based on pattern since not provided)
+I6xx = 0.002; I6yy = 0.002; I6zz = 0.001;
+I6xy = 0; I6xz = 0; I6yx = 0; I6yz = 0; I6zx = 0; I6zy = 0;
+I6 = [I6xx, I6xy, I6xz; I6yx, I6yy, I6yz; I6zx, I6zy, I6zz];
+%% Gravity vector in inertial frame
+g = 9.81; % Standard gravity
+g0 = [0; 0; -g];
+%% Rotation matrices - compute on all processes to avoid communication overhead
+% DH convention rotation matrices
+R01 = dh_rotation(q1, alpha(1), a(1), d(1));
+R12 = dh_rotation(q2, alpha(2), a(2), d(2));
+R23 = dh_rotation(q3, alpha(3), a(3), d(3));
+R34 = dh_rotation(q4, alpha(4), a(4), d(4));
+R45 = dh_rotation(q5, alpha(5), a(5), d(5));
+R56 = dh_rotation(q6, alpha(6), a(6), d(6));
+% Compound rotation matrices
+R02 = simplify(R01 * R12);
+R03 = simplify(R02 * R23);
+R04 = simplify(R03 * R34);
+R05 = simplify(R04 * R45);
+R06 = simplify(R05 * R56);
+%% Axis of rotation of joint i expressed in frame i
+z0 = [0; 0; 1];
+b1 = simplify(R01' * z0);
+b2 = simplify(R12' * b1);
+b3 = simplify(R23' * b2);
+b4 = simplify(R34' * b3);
+b5 = simplify(R45' * b4);
+b6 = simplify(R56' * b5);
+%% Forward recursion - Distributed with MPI
+% Each process handles specific links in the forward recursion
+ω = cell(6,1);
+α = cell(6,1);
+Dω = cell(6,1);
+ac = cell(6,1);
+g_local = cell(6,1);
+% All processes compute Link 1 parameters (needed for subsequent calculations)
+% Forward recursion: Link 1
+ω{1} = b1 * Dq(1);
+α{1} = b1 * DDq(1) + cross(ω{1}, b1 * Dq(1));
+Dω{1} = diff(ω{1}, t);
+ac{1} = cross(Dω{1}, r0c1) + cross(ω{1}, cross(ω{1}, r0c1));
+g_local{1} = R01' * g0;
+% Distribute remaining links across processes
+% Determine which links this process will handle
+links_per_process = ceil(5 / (size-1)); % -1 because rank 0 will collect results
+start_link = (rank-1) * links_per_process + 2; % +2 because we start from link 2
+end_link = min(start_link + links_per_process - 1, 6);
+% Only compute if this process has links assigned (rank > 0)
+if rank > 0 && rank <= ceil(5/(links_per_process))
+ % Process assigned links
+ for i = start_link:end_link
+ if i == 2
+ % Forward recursion: Link 2
+ ω{2} = R12' * ω{1} + b2 * Dq(2);
+ α{2} = R12' * α{1} + b2 * DDq(2) + cross(ω{2}, b2 * Dq(2));
+ Dω{2} = diff(ω{2}, t);
+ ac{2} = R12' * (cross(Dω{1}, r01) + cross(ω{1}, cross(ω{1}, r01))) + ...
+ cross(Dω{2}, r1c2) + cross(ω{2}, cross(ω{2}, r1c2));
+ g_local{2} = R02' * g0;
+
+ elseif i == 3
+ % Forward recursion: Link 3
+ % Need results from Link 2, so we compute if not already available
+ if i-1 < start_link
+ % Compute Link 2 first
+ ω{2} = R12' * ω{1} + b2 * Dq(2);
+ α{2} = R12' * α{1} + b2 * DDq(2) + cross(ω{2}, b2 * Dq(2));
+ Dω{2} = diff(ω{2}, t);
+ end
+
+ ω{3} = R23' * ω{2} + b3 * Dq(3);
+ α{3} = R23' * α{2} + b3 * DDq(3) + cross(ω{3}, b3 * Dq(3));
+ Dω{3} = diff(ω{3}, t);
+ ac{3} = R23' * (R12' * (cross(Dω{1}, r01) + cross(ω{1}, cross(ω{1}, r01))) + ...
+ cross(Dω{2}, r12) + cross(ω{2}, cross(ω{2}, r12))) + ...
+ cross(Dω{3}, r2c3) + cross(ω{3}, cross(ω{3}, r2c3));
+ g_local{3} = R03' * g0;
+
+ elseif i == 4
+ % Forward recursion: Link 4
+ % Need results from links 2 and 3
+ if i-2 < start_link
+ % Compute Links 2 and 3 first
+ ω{2} = R12' * ω{1} + b2 * Dq(2);
+ α{2} = R12' * α{1} + b2 * DDq(2) + cross(ω{2}, b2 * Dq(2));
+ Dω{2} = diff(ω{2}, t);
+
+ ω{3} = R23' * ω{2} + b3 * Dq(3);
+ α{3} = R23' * α{2} + b3 * DDq(3) + cross(ω{3}, b3 * Dq(3));
+ Dω{3} = diff(ω{3}, t);
+ end
+
+ ω{4} = R34' * ω{3} + b4 * Dq(4);
+ α{4} = R34' * α{3} + b4 * DDq(4) + cross(ω{4}, b4 * Dq(4));
+ Dω{4} = diff(ω{4}, t);
+ ac{4} = R34' * (R23' * (R12' * (cross(Dω{1}, r01) + cross(ω{1}, cross(ω{1}, r01))) + ...
+ cross(Dω{2}, r12) + cross(ω{2}, cross(ω{2}, r12))) + ...
+ cross(Dω{3}, r23) + cross(ω{3}, cross(ω{3}, r23))) + ...
+ cross(Dω{4}, r3c4) + cross(ω{4}, cross(ω{4}, r3c4));
+ g_local{4} = R04' * g0;
+
+ elseif i == 5
+ % Forward recursion: Link 5
+ % Need results from links 2, 3, and 4
+ if i-3 < start_link
+ % Compute necessary previous links
+ ω{2} = R12' * ω{1} + b2 * Dq(2);
+ α{2} = R12' * α{1} + b2 * DDq(2) + cross(ω{2}, b2 * Dq(2));
+ Dω{2} = diff(ω{2}, t);
+
+ ω{3} = R23' * ω{2} + b3 * Dq(3);
+ α{3} = R23' * α{2} + b3 * DDq(3) + cross(ω{3}, b3 * Dq(3));
+ Dω{3} = diff(ω{3}, t);
+
+ ω{4} = R34' * ω{3} + b4 * Dq(4);
+ α{4} = R34' * α{3} + b4 * DDq(4) + cross(ω{4}, b4 * Dq(4));
+ Dω{4} = diff(ω{4}, t);
+ end
+
+ ω{5} = R45' * ω{4} + b5 * Dq(5);
+ α{5} = R45' * α{4} + b5 * DDq(5) + cross(ω{5}, b5 * Dq(5));
+ Dω{5} = diff(ω{5}, t);
+ ac{5} = R45' * (R34' * (R23' * (R12' * (cross(Dω{1}, r01) + cross(ω{1}, cross(ω{1}, r01)))
++ ...
+ cross(Dω{2}, r12) + cross(ω{2}, cross(ω{2}, r12))) + ...
+ cross(Dω{3}, r23) + cross(ω{3}, cross(ω{3}, r23))) + ...
+ cross(Dω{4}, r34) + cross(ω{4}, cross(ω{4}, r34))) + ...
+ cross(Dω{5}, r4c5) + cross(ω{5}, cross(ω{5}, r4c5));
+ g_local{5} = R05' * g0;
+
+ elseif i == 6
+ % Forward recursion: Link 6
+ % Need results from all previous links
+ if i-4 < start_link
+ % Compute necessary previous links
+ ω{2} = R12' * ω{1} + b2 * Dq(2);
+ α{2} = R12' * α{1} + b2 * DDq(2) + cross(ω{2}, b2 * Dq(2));
+ Dω{2} = diff(ω{2}, t);
+
+ ω{3} = R23' * ω{2} + b3 * Dq(3);
+ α{3} = R23' * α{2} + b3 * DDq(3) + cross(ω{3}, b3 * Dq(3));
+ Dω{3} = diff(ω{3}, t);
+
+ ω{4} = R34' * ω{3} + b4 * Dq(4);
+ α{4} = R34' * α{3} + b4 * DDq(4) + cross(ω{4}, b4 * Dq(4));
+ Dω{4} = diff(ω{4}, t);
+
+ ω{5} = R45' * ω{4} + b5 * Dq(5);
+ α{5} = R45' * α{4} + b5 * DDq(5) + cross(ω{5}, b5 * Dq(5));
+ Dω{5} = diff(ω{5}, t);
+ end
+
+ ω{6} = R56' * ω{5} + b6 * Dq(6);
+ α{6} = R56' * α{5} + b6 * DDq(6) + cross(ω{6}, b6 * Dq(6));
+ Dω{6} = diff(ω{6}, t);
+ ac{6} = R56' * (R45' * (R34' * (R23' * (R12' * (cross(Dω{1}, r01) + cross(ω{1},
+cross(ω{1}, r01))) + ...
+ cross(Dω{2}, r12) + cross(ω{2}, cross(ω{2}, r12))) + ...
+ cross(Dω{3}, r23) + cross(ω{3}, cross(ω{3}, r23))) + ...
+ cross(Dω{4}, r34) + cross(ω{4}, cross(ω{4}, r34))) + ...
+ cross(Dω{5}, r45) + cross(ω{5}, cross(ω{5}, r45))) + ...
+ cross(Dω{6}, r5c6) + cross(ω{6}, cross(ω{6}, r5c6));
+ g_local{6} = R06' * g0;
+ end
+ end
+
+ % Send results to rank 0 (master process)
+ for i = start_link:end_link
+ % Pack the results for this link
+ link_data = struct('ω', ω{i}, 'α', α{i}, 'Dω', Dω{i}, 'ac', ac{i}, 'g_local', g_local{i});
+
+ % Serialize the data for MPI transmission
+ serialized_data = hlp_serialize(link_data);
+
+ % Send data to rank 0
+ MPI_Send(serialized_data, 0, i, MPI_COMM_WORLD);
+ end
+end
+% Master process (rank 0) receives results and continues
+if rank == 0
+ % Receive results from other processes
+ for i = 2:6
+ % Determine which process handled this link
+ source_rank = floor((i-2)/links_per_process) + 1;
+
+ % Receive serialized data
+ [serialized_data, status] = MPI_Recv(source_rank, i, MPI_COMM_WORLD);
+
+ % Deserialize the data
+ link_data = hlp_deserialize(serialized_data);
+
+ % Unpack the results
+ ω{i} = link_data.ω;
+ α{i} = link_data.α;
+ Dω{i} = link_data.Dω;
+ ac{i} = link_data.ac;
+ g_local{i} = link_data.g_local;
+ end
+
+ % Now the master process has all forward recursion results
+ % Proceed with backward recursion
+
+ %% Backward recursion
+ % Initialize variables to hold torque results
+ f = cell(6,1);
+ τ = cell(6,1);
+ τDyn = cell(6,1);
+
+ % Backward recursion: Link 6
+ f{6} = m6 * ac{6} - m6 * g_local{6};
+ τ{6} = -cross(f{6}, r5c6) + I6 * α{6} + cross(ω{6}, I6 * ω{6});
+ τDyn{6} = simplify(b6' * τ{6});
+
+ % Backward recursion: Link 5
+ f{5} = R56 * f{6} + m5 * ac{5} - m5 * g_local{5};
+ τ{5} = R56 * τ{6} - cross(f{5}, r4c5) + cross(R56 * f{6}, r5c5) + I5 * α{5} + cross(ω{5}, I5 *
+ω{5});
+ τDyn{5} = simplify(b5' * τ{5});
+
+ % Backward recursion: Link 4
+ f{4} = R45 * f{5} + m4 * ac{4} - m4 * g_local{4};
+ τ{4} = R45 * τ{5} - cross(f{4}, r3c4) + cross(R45 * f{5}, r4c4) + I4 * α{4} + cross(ω{4}, I4 *
+ω{4});
+ τDyn{4} = simplify(b4' * τ{4});
+
+ % Backward recursion: Link 3
+ f{3} = R34 * f{4} + m3 * ac{3} - m3 * g_local{3};
+ τ{3} = R34 * τ{4} - cross(f{3}, r2c3) + cross(R34 * f{4}, r3c3) + I3 * α{3} + cross(ω{3}, I3 *
+ω{3});
+ τDyn{3} = simplify(b3' * τ{3});
+
+ % Backward recursion: Link 2
+ f{2} = R23 * f{3} + m2 * ac{2} - m2 * g_local{2};
+ τ{2} = R23 * τ{3} - cross(f{2}, r1c2) + cross(R23 * f{3}, r2c2) + I2 * α{2} + cross(ω{2}, I2 *
+ω{2});
+ τDyn{2} = simplify(b2' * τ{2});
+
+ % Backward recursion: Link 1
+ f{1} = R12 * f{2} + m1 * ac{1} - m1 * g_local{1};
+ τ{1} = R12 * τ{2} - cross(f{1}, r0c1) + cross(R12 * f{2}, r1c1) + I1 * α{1} + cross(ω{1}, I1 *
+ω{1});
+ τDyn{1} = simplify(b1' * τ{1});
+
+ % Collect results
+ τ1Dyn = τDyn{1};
+ τ2Dyn = τDyn{2};
+ τ3Dyn = τDyn{3};
+ τ4Dyn = τDyn{4};
+ τ5Dyn = τDyn{5};
+ τ6Dyn = τDyn{6};
+
+ %% Setting up the matrix elements - Split work across processes
+ % Send tasks to worker processes
+
+ % Calculate Mass Matrix
+ M = zeros(6, 6);
+ subs_zero = [Dq(1) 0 Dq(2) 0 Dq(3) 0 Dq(4) 0 Dq(5) 0 Dq(6) 0 g 0];
+
+ % Distribute mass matrix calculation across processes
+ rows_per_process = ceil(6 / (size-1));
+
+ % Send tasks to worker processes
+ for worker = 1:min(size-1, 6)
+ start_row = (worker-1) * rows_per_process + 1;
+ end_row = min(start_row + rows_per_process - 1, 6);
+
+ % Send task details
+ task = struct('type', 'mass_matrix', 'start_row', start_row, 'end_row', end_row);
+ serialized_task = hlp_serialize(task);
+ MPI_Send(serialized_task, worker, 0, MPI_COMM_WORLD);
+
+ % Send required data
+ dyn_data = struct('τ1Dyn', τ1Dyn, 'τ2Dyn', τ2Dyn, 'τ3Dyn', τ3Dyn, ...
+ 'τ4Dyn', τ4Dyn, 'τ5Dyn', τ5Dyn, 'τ6Dyn', τ6Dyn);
+ serialized_dyn = hlp_serialize(dyn_data);
+ MPI_Send(serialized_dyn, worker, 1, MPI_COMM_WORLD);
+ end
+
+ % Receive results from worker processes
+ for worker = 1:min(size-1, 6)
+ start_row = (worker-1) * rows_per_process + 1;
+ end_row = min(start_row + rows_per_process - 1, 6);
+
+ % Receive mass matrix rows
+ [serialized_rows, status] = MPI_Recv(worker, 2, MPI_COMM_WORLD);
+ M_rows = hlp_deserialize(serialized_rows);
+
+ % Insert into mass matrix
+ for i = start_row:end_row
+ M(i,:) = M_rows(i-start_row+1,:);
+ end
+ end
+
+ % Calculate gravity vector - can be done by root process
+ G = zeros(6, 1);
+ subs_zero_acc = [DDq(1) 0 DDq(2) 0 DDq(3) 0 DDq(4) 0 DDq(5) 0 DDq(6) 0 ...
+ Dq(1) 0 Dq(2) 0 Dq(3) 0 Dq(4) 0 Dq(5) 0 Dq(6) 0];
+
+ % Calculate gravity vector
+ for i = 1:6
+ switch i
+ case 1
+ G(i) = subs(τ1Dyn, subs_zero_acc);
+ case 2
+ G(i) = subs(τ2Dyn, subs_zero_acc);
+ case 3
+ G(i) = subs(τ3Dyn, subs_zero_acc);
+ case 4
+ G(i) = subs(τ4Dyn, subs_zero_acc);
+ case 5
+ G(i) = subs(τ5Dyn, subs_zero_acc);
+ case 6
+ G(i) = subs(τ6Dyn, subs_zero_acc);
+ end
+ end
+
+ %% Setting up the dynamic system
+ % Assemble the final dynamics
+ τD = [τ1Dyn; τ2Dyn; τ3Dyn; τ4Dyn; τ5Dyn; τ6Dyn];
+
+ % Calculate Coriolis and centrifugal terms
+ C_Dq = simplify(τD - M * [DDq(1); DDq(2); DDq(3); DDq(4); DDq(5); DDq(6)] - G);
+
+ %% Kinetic energy
+ % Calculate the total kinetic energy
+ KE = 0;
+ for i = 1:6
+ for j = 1:6
+ KE = KE + 0.5 * M(i,j) * Dq(i) * Dq(j);
+ end
+ end
+ KE = simplify(KE);
+
+ %% Matlab conversion
+ % Generate MATLAB function for numerical computation
+ matlabFunction([M, C_Dq, G], 'File', 'IRB140_dynamics_MPI', 'Vars', {q, Dq});
+
+ disp('Dynamic model computation complete');
+end
+% Worker processes compute mass matrix elements as assigned
+if rank > 0
+ % Receive task assignment
+ [serialized_task, status] = MPI_Recv(0, 0, MPI_COMM_WORLD);
+ task = hlp_deserialize(serialized_task);
+
+ % Receive dynamic data
+ [serialized_dyn, status] = MPI_Recv(0, 1, MPI_COMM_WORLD);
+ dyn_data = hlp_deserialize(serialized_dyn);
+
+ % Extract dynamic equations
+ τ1Dyn = dyn_data.τ1Dyn;
+ τ2Dyn = dyn_data.τ2Dyn;
+ τ3Dyn = dyn_data.τ3Dyn;
+ τ4Dyn = dyn_data.τ4Dyn;
+ τ5Dyn = dyn_data.τ5Dyn;
+ τ6Dyn = dyn_data.τ6Dyn;
+
+ % Process task based on type
+ if strcmp(task.type, 'mass_matrix')
+ % Calculate assigned mass matrix rows
+ start_row = task.start_row;
+ end_row = task.end_row;
+
+ subs_zero = [Dq(1) 0 Dq(2) 0 Dq(3) 0 Dq(4) 0 Dq(5) 0 Dq(6) 0 g 0];
+ M_rows = zeros(end_row - start_row + 1, 6);
+
+ row_idx = 1;
+for i = start_row:end_row
+ row_idx = i - start_row + 1;
+
+ % For each row, compute all columns
+ for j = 1:6
+ % Create a vector of zeros for DDq
+ ddq_subs = zeros(1, 12);
+ for k = 1:6
+ ddq_subs(2*k-1) = DDq(k);
+ ddq_subs(2*k) = 0;
+ end
+
+ % Set the j-th joint acceleration to 1
+ ddq_subs(2*j-1) = DDq(j);
+ ddq_subs(2*j) = 1;
+
+ % Compute Mass Matrix element (i,j)
+ switch i
+ case 1
+ M_rows(row_idx, j) = subs(subs(τ1Dyn, ddq_subs), subs_zero);
+ case 2
+ M_rows(row_idx, j) = subs(subs(τ2Dyn, ddq_subs), subs_zero);
+ case 3
+ M_rows(row_idx, j) = subs(subs(τ3Dyn, ddq_subs), subs_zero);
+ case 4
+ M_rows(row_idx, j) = subs(subs(τ4Dyn, ddq_subs), subs_zero);
+ case 5
+ M_rows(row_idx, j) = subs(subs(τ5Dyn, ddq_subs), subs_zero);
+ case 6
+ M_rows(row_idx, j) = subs(subs(τ6Dyn, ddq_subs), subs_zero);
+ end
+ end
+ end
+
+ % Send mass matrix rows back to the master process
+ serialized_rows = hlp_serialize(M_rows);
+ MPI_Send(serialized_rows, 0, 2, MPI_COMM_WORLD);
+ end
+end
+% Finalize MPI when all processes are done
+MPI_Finalize();
+%% Helper function to calculate rotation matrices according to DH convention
+function R = dh_rotation(theta, alpha, a, d)
+ % Calculate the rotation matrix for DH parameters
+ % theta: joint angle
+ % alpha: link twist
+ % a: link length
+ % d: link offset
+
+ ct = cos(theta);
+ st = sin(theta);
+ ca = cos(alpha);
+ sa = sin(alpha);
+
+ R = [ct, -st*ca, st*sa;
+ st, ct*ca, -ct*sa;
+ 0, sa, ca];
+end
+%% Helper function to serialize data for MPI transmission
+function serialized = hlp_serialize(data)
+ % This is a placeholder for a proper serialization function
+ % In a real implementation, you would use a proper serialization library
+ % that can handle MATLAB symbolic objects
+
+ % For a real implementation, consider using MATLAB's built-in serialization:
+ serialized = getByteStreamFromArray(data);
+
+ % Or if using custom MPI interface, you might need to implement custom serialization
+ % that is compatible with your MPI library
+end
+%% Helper function to deserialize data received via MPI
+function data = hlp_deserialize(serialized)
+ % This is a placeholder for a proper deserialization function
+ % that matches the serialization function above
+
+ % For a real implementation with MATLAB's serialization:
+ data = getArrayFromByteStream(serialized);
+
+ % Or if using custom MPI interface, implement matching deserialization
+end
+%% Alternative implementation using MATLAB's parallel computing capabilities
+% If the direct MPI interface is not available, you can use MATLAB's parallel
+% computing toolbox with the following equivalent code:
+% function computeIRB140Dynamics()
+% % Create a parallel pool
+% if isempty(gcp('nocreate'))
+% parpool('local', feature('numcores'));
+% end
+%
+% % Define common variables and parameters
+% % [All the symbolic variables, DH parameters, etc. from the main code]
+%
+% % Distribute work across workers
+% spmd
+% % Each worker calculates a portion of the forward recursion
+% % [Forward recursion code modified for parallel execution]
+%
+% % Combine results
+% % [Code to gather and combine results]
+%
+% % Master worker (lab 1) performs backward recursion
+% if labindex == 1
+% % [Backward recursion code]
+% end
+% end
+% end
