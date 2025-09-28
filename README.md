@@ -1,1 +1,1 @@
-Codes for robotic manipulator IRB 140
+Codes for Sequential and Parallel Strategies of Robotic Manipulator IRB 140 Dynamics
